@@ -1,4 +1,3 @@
-
 ENTRY(_Reset)
 SECTIONS
 {
