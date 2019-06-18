@@ -41,6 +41,5 @@ if __name__ == '__main__':
     test_suites = loader.discover('.', pattern='*test.py')
     loader.print_configurable_tests()
     loader.send_config_data()
-    print(test_suites)
     test_runner = unittest.TextTestRunner()
     test_runner.run(test_suites)

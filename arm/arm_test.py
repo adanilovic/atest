@@ -11,6 +11,7 @@ import subprocess
 import os
 
 class OutputTestCase(unittest.TestCase):
+    #FIXME: Move to common unittest infrastructure module
     def setUp(self):
         self.addl_setUp()
 
@@ -22,6 +23,7 @@ class OutputTestCase(unittest.TestCase):
         pass
 
 class ARMTestUtil(OutputTestCase):
+    #FIXME: Move to top level configuration dictionary
     base_gcc_path    = os.path.expanduser('~/Downloads/gcc-arm-8.3-2019.03-x86_64-aarch64-elf/bin/')
     gcc_prefix   = 'aarch64-elf-'
     gcc_path     = '{}{}{}'.format(base_gcc_path, gcc_prefix, 'gcc')
@@ -71,25 +73,27 @@ class ARMInstructionTest(ARMTestUtil):
         self.create_output_dir(self.output_dir)
 
     def test_gnu_arm_assembly_strip_debug_symbols(self):
-        return
+
         completed_process = subprocess.run([self.as_path, '-mcpu=cortex-a53', '-g', self.asm_source_file, '-o', self.obj_output_file]);
         completed_process = subprocess.run([self.objdump_path, '-t', self.obj_output_file])
         completed_process = subprocess.run([self.strip_path, '-g', self.obj_output_file])
         completed_process = subprocess.run([self.objdump_path, '-t', self.obj_output_file])
+        #FIXME: Add assert statements
 
     def test_gnu_arm_linker_simple_1(self):
-        return
+
         completed_process = subprocess.run([self.as_path, '-mcpu=cortex-a53', '-g', self.asm_source_file, '-o', self.obj_output_file]);
         completed_process = subprocess.run([self.strip_path, '-d', self.obj_output_file])
         completed_process = subprocess.run([self.ld_path, '-M', '-print-memory-usage', '-T', self.linker_source_file, self.obj_output_file, '-o', self.elf_output_file]);
         completed_process = subprocess.run([self.objdump_path, '-t', '-d', self.elf_output_file])
+        #FIXME: Add assert statements
 
     def test_qemu_ID_AA64PFR0_EL1(self):
         """
         Verify the contents of the ID_AA64PFR0_EL1 register report
         that all 4 exception levels are implemented.
         """
-        return
+        return  #FIXME: Currently failing due to qemu returning 0x22, meaning only EL0 and EL1 implemented
         completed_process = subprocess.run([self.as_path, '-mcpu=cortex-a53', '-g', self.asm_source_file, '-o', self.obj_output_file]);
         completed_process = subprocess.run([self.ld_path, '-M', '-print-memory-usage', '-T', self.linker_source_file, self.obj_output_file, '-o', self.elf_output_file]);
         completed_process = subprocess.run([self.objdump_path, '-t', '-d', self.elf_output_file])
