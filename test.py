@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/ython3
 
 """
 Standard python import statements

@@ -815,11 +815,13 @@ class ARMInstructionTest(ARMTestUtil):
               B sleep
 
             boot:
-
               adr x1, output
               ldr x0, [x1]
-              cmp x0, 4
-              bne boot
+              sub x0, x0, #4
+              cbz x0, done_waiting
+              b boot
+
+              done_waiting:
 
               /* Write data to output */
               mov x12, #0x4
@@ -874,24 +876,28 @@ class ARMInstructionTest(ARMTestUtil):
         completed_process = subprocess.run([self.as_path, '-mcpu=cortex-a53', '-g', 'test.s', '-o', 'test.o']);
         print(completed_process.stdout)
 
-        completed_process = subprocess.run([self.ld_path, '-T', 'test.ld', 'test.o', '-o', 'test.elf']);
+        completed_process = subprocess.run([self.ld_path, '-M', '-print-memory-usage', '-T', 'test.ld', 'test.o', '-o', 'test.elf']);
         print(completed_process.stdout)
 
-        completed_process = subprocess.run([self.qemu_system_aarch64_path,
-                                            '-semihosting',
-                                            '-machine', 'raspi3',
-                                            '-cpu', 'cortex-a53',
-                                            '-nographic',
-                                            '-kernel',
-                                            'test.elf'],
-                                           stdout=subprocess.PIPE,
-                                           stderr=subprocess.PIPE)
+        completed_process = subprocess.run([self.objdump_path, '-t', '-d', 'test.elf'])
         print(completed_process.stdout)
-        print('stderr is')
-        print(completed_process.stderr)
-        print(completed_process.returncode)
-        self.assertEqual(0x77, completed_process.returncode)
-        self.assertEqual(b'\x01\x00\x00\x00', completed_process.stderr)
+
+        for i in range(0, 100):
+            completed_process = subprocess.run([self.qemu_system_aarch64_path,
+                                                '-semihosting',
+                                                '-machine', 'raspi3',
+                                                '-cpu', 'cortex-a53',
+                                                '-nographic',
+                                                '-kernel',
+                                                'test.elf'],
+                                               stdout=subprocess.PIPE,
+                                               stderr=subprocess.PIPE)
+            print(completed_process.stdout)
+            print('stderr is')
+            print(completed_process.stderr)
+            print(completed_process.returncode)
+            self.assertEqual(0x77, completed_process.returncode)
+            self.assertEqual(b'\x04\x00\x00\x00', completed_process.stderr)
 
 if __name__ == '__main__':
     unittest.main()

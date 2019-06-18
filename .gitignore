@@ -1,2 +1,5 @@
 *pycache*
 tags
+*.elf
+*.map
+*.o
