@@ -232,11 +232,7 @@ class ARMInstructionTest(ARMTestUtil):
         """
 
         completed_process = subprocess.run([self.as_path, '-mcpu=cortex-a53', '-g', self.asm_source_file, '-o', self.obj_output_file]);
-        print(completed_process.stdout)
-
         completed_process = subprocess.run([self.ld_path, '-T', self.linker_source_file, self.obj_output_file, '-o', self.elf_output_file]);
-        print(completed_process.stdout)
-
         completed_process = subprocess.run([self.qemu_system_aarch64_path,
                                             '-semihosting',
                                             '-machine', 'raspi3',
@@ -252,6 +248,33 @@ class ARMInstructionTest(ARMTestUtil):
         print(completed_process.returncode)
         self.assertEqual(0x77, completed_process.returncode)
         self.assertEqual(b'\x44\x33\x22\x11', completed_process.stderr)
+
+    def test_rvbaraddr(self):
+        """
+        Verify the value of the rvbaraddr register
+        """
+
+        completed_process = subprocess.run([self.as_path, '-mcpu=cortex-a53', '-g', self.asm_source_file, '-o', self.obj_output_file]);
+        completed_process = subprocess.run([self.ld_path, '-T', self.linker_source_file, self.obj_output_file, '-o', self.elf_output_file]);
+        completed_process = subprocess.run([self.objdump_path, '-t', '-d', self.elf_output_file])
+        print(completed_process.stdout)
+        completed_process = subprocess.run([self.qemu_system_aarch64_path,
+                                            '-semihosting',
+                                            '-machine', 'raspi3',
+                                            '-cpu', 'cortex-a53',
+                                            '-nographic',
+                                            '-kernel',
+                                            self.elf_output_file],
+                                           stdout=subprocess.PIPE,
+                                           stderr=subprocess.PIPE)
+        print('stdout is')
+        print(completed_process.stdout)
+        print('stderr is')
+        print(completed_process.stderr)
+        print('returncode is')
+        print(completed_process.returncode)
+        self.assertEqual(0x77, completed_process.returncode)
+        self.assertEqual(b'\x00\x00\x00\x00', completed_process.stderr)
 
     def test_multicore_lock_critical_section(self):
         """
