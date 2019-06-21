@@ -63,20 +63,14 @@ cache_init:
     and x1, x4, #0x7
     add x1, x1, #0x4
 
-    adr x7, cache_line_size
-    str x1, [x7]
+    adr x7, ccsidr
+    str x4, [x7]
 
     ldr x3, =0x7FFF
     and x2, x3, x4, LSR #13
 
-    adr x7, cache_set_number
-    str x2, [x7]
-
     ldr x3, =0x3FF
     and x3, x3, x4, lsr #3
-
-    adr x7, cache_associativity_number
-    str x3, [x7]
 
     clz w4, w3
 
@@ -135,13 +129,14 @@ cpu3_boot:
     b .
 
 boot:
-    adr x1, cache_line_size
-    bl write_byte_to_stderr
 
-    adr x1, cache_set_number
+    adr x1, ccsidr
     bl write_byte_to_stderr
-
-    adr x1, cache_associativity_number
+    add x1, x1, #1
+    bl write_byte_to_stderr
+    add x1, x1, #1
+    bl write_byte_to_stderr
+    add x1, x1, #1
     bl write_byte_to_stderr
 
     mrs x8, CLIDR_EL1
@@ -176,7 +171,5 @@ boot:
 code:                       .dword 0x00020026
 status:                     .dword 0x77777777
 number_of_caches:           .dword 0xffffffff
-cache_line_size:            .dword 0xffffffff
-cache_set_number:           .dword 0xffffffff
-cache_associativity_number: .dword 0xffffffff
+ccsidr:                     .dword 0xffffffff
 .end

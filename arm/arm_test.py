@@ -15,12 +15,13 @@ class RegisterFieldOutOfBoundError(Exception):
     pass
 
 class RegisterField(object):
-    def __init__(self, name, width, shift, value, name_value_dict):
+    def __init__(self, name, width, shift, value, name_value_dict, conversion_function=None):
         self.name = name
         self.width = width
         self.shift = shift
         self.value = value
         self.name_value_dict = name_value_dict
+        self.conversion_function = conversion_function
 
     def set_value(self, value):
         if value > (pow(2, self.width) - 1):
@@ -29,6 +30,8 @@ class RegisterField(object):
         self.value = value
 
     def get_value(self):
+        if self.conversion_function:
+            return self.conversion_function(self.value)
         return self.value
 
     def get_name(self):
@@ -43,16 +46,16 @@ class Register(object):
     def __init__(self, fields):
         self.fields = fields
 
-    def set_value(self, value):
+    def set_value(self, register_value):
         for field in self.fields:
             shift = self.fields[field].shift
             width = self.fields[field].width
             mask = pow(2, width) - 1
-            field_value = (value & (mask << shift)) >> shift
+            field_value = (register_value & (mask << shift)) >> shift
             self.fields[field].set_value(field_value)
 
-    def set_field(self, field, value):
-        self.fields[field].set_value(value)
+    def set_field(self, field, field_value):
+        self.fields[field].set_value(field_value)
 
     def get_field(self, field):
         return self.fields[field].get_value()
@@ -102,6 +105,38 @@ class CLIDR_EL1(Register):
             'Ctype1' : RegisterField(name='Cache Type 1', width=3, shift=0,  value=0,
                                      name_value_dict=CLIDR_EL1.ctype_name_value_dict),
         })
+
+class CCSIDR_EL1(Register):
+
+    def __init__(self):
+        Register.__init__(self, {
+            'LineSize'        : RegisterField(name='Cache Line Size',
+                                              width=3, shift=0, value=0,
+                                              name_value_dict={},
+                                              conversion_function=self.calc_cache_line_size_from_register_value),
+            'Associativity'   : RegisterField(name='Associativity of cache - 1',
+                                              width=10, shift=3, value=0,
+                                              name_value_dict={},
+                                              conversion_function=self.calc_associativity_from_register_value),
+            'NumSets'         : RegisterField(name='Number of sets - 1',
+                                              width=15, shift=13, value=0,
+                                              name_value_dict={},
+                                              conversion_function=self.calc_num_sets_from_register_value),
+        })
+
+    def calc_cache_line_size_from_register_value(self, field_value):
+        return pow(2, field_value + 4)
+
+    def calc_associativity_from_register_value(self, field_value):
+        return (field_value + 1)
+
+    def calc_num_sets_from_register_value(self, field_value):
+        return (field_value + 1)
+
+    def cache_size(self):
+        return self.fields['LineSize'].get_value() * \
+                self.fields['Associativity'].get_value() * \
+                  self.fields['NumSets'].get_value()
 
 class RegisterTests(unittest.TestCase):
     def test_basic_register_get_set(self):
@@ -183,6 +218,13 @@ class RegisterTests(unittest.TestCase):
         self.assertEqual(False, clidr.get_field_value_name('LoUU'))
         self.assertEqual('Not disclosed by this mechanism', clidr.get_field_value_name('ICB'))
 
+class CCSIDR_tests(unittest.TestCase):
+    def test_calc_cache_line_size(self):
+        ccsidr = CCSIDR_EL1()
+        self.assertEqual(16,  ccsidr.calc_cache_line_size_from_register_value(0))
+        self.assertEqual(32,  ccsidr.calc_cache_line_size_from_register_value(1))
+        self.assertEqual(64,  ccsidr.calc_cache_line_size_from_register_value(2))
+        self.assertEqual(128, ccsidr.calc_cache_line_size_from_register_value(3))
 
 class OutputTestCase(unittest.TestCase):
     #FIXME: Move to common unittest infrastructure module
@@ -476,29 +518,35 @@ class ARMInstructionTest(ARMTestUtil):
         print('returncode is')
         print(completed_process.returncode)
         self.assertEqual(0x77, completed_process.returncode)
+        self.assertEqual('1ae00f702300200a', qemu_stderr)
 
-        cache_line_size = qemu_stderr[0:2]
-        number_of_sets = qemu_stderr[2:4]
-        number_of_ways = qemu_stderr[4:6]
-        number_of_caches_temp = qemu_stderr[6:14]
-        print('number_of_caches_temp = ', number_of_caches_temp)
-        print('size of bit is ', hex(int(qemu_stderr[6:14], 16)))
-        packed = struct.pack('>I', int(qemu_stderr[6:14], 16))
-        print('packed = ', packed)
-        swapped = struct.unpack('>i', struct.pack('<i', int(qemu_stderr[6:14], 16)))
-        print('swapped = ', '{:#010x}'.format(swapped[0]), type(swapped[0]))
-        # print('dumdum is ', struct.unpack('>c', list(completed_process.stderr[6:14])))
-        # number_of_caches = int.from_bytes(qemu_stderr[6:14], byteorder='big')
-        # number_of_caches =
-        print(cache_line_size)
-        print(number_of_sets)
-        print(number_of_ways)
-        print(number_of_caches_temp)
-        #6 means cache line size of 64 bytes
-        #0x7f means 128 sets
-        #3 means 4 ways
+        print('clidr is ', hex(int(qemu_stderr[8:16], 16)))
+        swapped = struct.unpack('>i', struct.pack('<i', int(qemu_stderr[8:16], 16)))
+        print('swapped is ', '{:#010x}'.format(swapped[0]), type(swapped[0]))
+        clidr = CLIDR_EL1()
+        clidr.set_value(swapped[0])
 
-        self.assertEqual('067f032300200a', qemu_stderr)
+        print('ccsidr is ', hex(int(qemu_stderr[0:8], 16)))
+        swapped = struct.unpack('>i', struct.pack('<i', int(qemu_stderr[0:8], 16)))
+        print('swapped is ', '{:#010x}'.format(swapped[0]), type(swapped[0]))
+
+        ccsidr = CCSIDR_EL1()
+        ccsidr.set_value(swapped[0])
+        print('Cache Level 0 Line Size is', ccsidr.get_field('LineSize'), 'Bytes')
+        print('Cache Level 0 Associativity is', ccsidr.get_field('Associativity'))
+        print('Cache Level 0 Number of Sets is', ccsidr.get_field('NumSets'))
+        print('Cache Level 0 size is', ccsidr.cache_size(), 'Bytes')
+        self.assertEqual(64, ccsidr.get_field('LineSize'))
+        self.assertEqual(4, ccsidr.get_field('Associativity'))
+        self.assertEqual(128, ccsidr.get_field('NumSets'))
+        self.assertEqual(32768, ccsidr.cache_size())
+
+        print('Cache Level 0 has', clidr.get_field_value_name('Ctype1'))
+        print('Cache Level 1 has a', clidr.get_field_value_name('Ctype2'))
+        print('LoUIS is', clidr.get_field('LoUIS'))
+        print('LoC is', clidr.get_field('LoC'))
+        print('LoUU is', clidr.get_field('LoUU'))
+        print('ICB is', clidr.get_field_value_name('ICB'))
 
     def test_multicore_lock_critical_section(self):
         """
@@ -528,7 +576,7 @@ class ARMInstructionTest(ARMTestUtil):
             self.assertEqual(b'\x04\x00\x00\x00', completed_process.stderr)
 
 def load_tests(loader, standard_tests, pattern):
-    test_cases = [ARMInstructionTest, RegisterTests]
+    test_cases = [ARMInstructionTest, RegisterTests, CCSIDR_tests]
     suite = unittest.TestSuite()
     for test_class in test_cases:
         tests = loader.loadTestsFromTestCase(test_class)
