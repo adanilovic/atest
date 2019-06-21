@@ -9,14 +9,18 @@ import sys
 import textwrap
 import subprocess
 import os
+import struct
 
 class RegisterFieldOutOfBoundError(Exception):
     pass
 
 class RegisterField(object):
-    def __init__(self, width, value):
+    def __init__(self, name, width, shift, value, name_value_dict):
+        self.name = name
         self.width = width
+        self.shift = shift
         self.value = value
+        self.name_value_dict = name_value_dict
 
     def set_value(self, value):
         if value > (pow(2, self.width) - 1):
@@ -27,45 +31,158 @@ class RegisterField(object):
     def get_value(self):
         return self.value
 
+    def get_name(self):
+        return self.name
+
+    def get_value_name(self):
+        if not self.name_value_dict:
+            return False
+        return self.name_value_dict[self.value]
+
 class Register(object):
     def __init__(self, fields):
         self.fields = fields
 
-class CLIDR_EL1(Register):
-    def __init__(self):
-        Register.__init__(self, {
-            'ICB'    : RegisterField(width=3, value=0),
-            'LoUU'   : RegisterField(width=3, value=0),
-            'LoC'    : RegisterField(width=3, value=0),
-            'LoUIS'  : RegisterField(width=3, value=0),
-            'Ctype7' : RegisterField(width=3, value=0),
-            'Ctype6' : RegisterField(width=3, value=0),
-            'Ctype5' : RegisterField(width=3, value=0),
-            'Ctype4' : RegisterField(width=3, value=0),
-            'Ctype3' : RegisterField(width=3, value=0),
-            'Ctype2' : RegisterField(width=3, value=0),
-            'Ctype1' : RegisterField(width=3, value=0),
-        })
+    def set_value(self, value):
+        for field in self.fields:
+            shift = self.fields[field].shift
+            width = self.fields[field].width
+            mask = pow(2, width) - 1
+            field_value = (value & (mask << shift)) >> shift
+            self.fields[field].set_value(field_value)
 
-    def set_value(self, field, value):
+    def set_field(self, field, value):
         self.fields[field].set_value(value)
 
-    def get_value(self, field):
+    def get_field(self, field):
         return self.fields[field].get_value()
+
+    def get_field_name(self, field):
+        return self.fields[field].get_name()
+
+    def get_field_value_name(self, field):
+        return self.fields[field].get_value_name()
+
+class CLIDR_EL1(Register):
+
+    ctype_name_value_dict = {0 : 'No cache',
+                             1 : 'Instruction cache only',
+                             2 : 'Data cache only',
+                             3 : 'Separate instruction and data caches',
+                             4 : 'Unified cache'}
+
+    def __init__(self):
+        Register.__init__(self, {
+            'ICB'    : RegisterField(name='Inner Cache Boundary',
+                                     width=3, shift=30, value=0,
+                                     name_value_dict={0 : 'Not disclosed by this mechanism',
+                                                      1 : 'L1 cache is the highest Inner Cacheable level',
+                                                      2 : 'L2 cache is the highest Inner Cacheable level',
+                                                      3 : 'L3 cache is the highest Inner Cacheable level',
+                                                      4 : 'L4 cache is the highest Inner Cacheable level',
+                                                      5 : 'L5 cache is the highest Inner Cacheable level',
+                                                      6 : 'L6 cache is the highest Inner Cacheable level',
+                                                      7 : 'L7 cache is the highest Inner Cacheable level',
+                                     }),
+            'LoUU'   : RegisterField(name='Level of Unification Uniprocessor', width=3, shift=27, value=0, name_value_dict={}),
+            'LoC'    : RegisterField(name='Level of Coherence', width=3, shift=24, value=0, name_value_dict={}),
+            'LoUIS'  : RegisterField(name='Level of Unfication Inner Shareable', width=3, shift=21, value=0, name_value_dict={}),
+            'Ctype7' : RegisterField(name='Cache Type 7', width=3, shift=18, value=0,
+                                     name_value_dict=CLIDR_EL1.ctype_name_value_dict),
+            'Ctype6' : RegisterField(name='Cache Type 6', width=3, shift=15, value=0,
+                                     name_value_dict=CLIDR_EL1.ctype_name_value_dict),
+            'Ctype5' : RegisterField(name='Cache Type 5', width=3, shift=12, value=0,
+                                     name_value_dict=CLIDR_EL1.ctype_name_value_dict),
+            'Ctype4' : RegisterField(name='Cache Type 4', width=3, shift=9,  value=0,
+                                     name_value_dict=CLIDR_EL1.ctype_name_value_dict),
+            'Ctype3' : RegisterField(name='Cache Type 3', width=3, shift=6,  value=0,
+                                     name_value_dict=CLIDR_EL1.ctype_name_value_dict),
+            'Ctype2' : RegisterField(name='Cache Type 2', width=3, shift=3,  value=0,
+                                     name_value_dict=CLIDR_EL1.ctype_name_value_dict),
+            'Ctype1' : RegisterField(name='Cache Type 1', width=3, shift=0,  value=0,
+                                     name_value_dict=CLIDR_EL1.ctype_name_value_dict),
+        })
 
 class RegisterTests(unittest.TestCase):
     def test_basic_register_get_set(self):
         clidr = CLIDR_EL1()
-        self.assertEqual(0, clidr.get_value('ICB'))
-        clidr.set_value('ICB', 3)
-        self.assertEqual(3, clidr.get_value('ICB'))
+        self.assertEqual(0, clidr.get_field('ICB'))
+        clidr.set_field('ICB', 3)
+        self.assertEqual(3, clidr.get_field('ICB'))
 
     def test_basic_register_invalid_set(self):
         clidr = CLIDR_EL1()
-        clidr.set_value('ICB', 7)
-        self.assertEqual(7, clidr.get_value('ICB'))
-        self.assertRaises(RegisterFieldOutOfBoundError, clidr.set_value, 'ICB', 8)
-        self.assertEqual(7, clidr.get_value('ICB'))
+        clidr.set_field('ICB', 7)
+        self.assertEqual(7, clidr.get_field('ICB'))
+        self.assertRaises(RegisterFieldOutOfBoundError, clidr.set_field, 'ICB', 8)
+        self.assertEqual(7, clidr.get_field('ICB'))
+
+    def test_get_field_name(self):
+        clidr = CLIDR_EL1()
+        self.assertEqual('Cache Type 1', clidr.get_field_name('Ctype1'))
+        self.assertEqual('Cache Type 2', clidr.get_field_name('Ctype2'))
+        self.assertEqual('Cache Type 3', clidr.get_field_name('Ctype3'))
+        self.assertEqual('Cache Type 4', clidr.get_field_name('Ctype4'))
+        self.assertEqual('Cache Type 5', clidr.get_field_name('Ctype5'))
+        self.assertEqual('Cache Type 6', clidr.get_field_name('Ctype6'))
+        self.assertEqual('Cache Type 7', clidr.get_field_name('Ctype7'))
+        self.assertEqual('Level of Unfication Inner Shareable', clidr.get_field_name('LoUIS'))
+        self.assertEqual('Level of Coherence', clidr.get_field_name('LoC'))
+        self.assertEqual('Level of Unification Uniprocessor', clidr.get_field_name('LoUU'))
+        self.assertEqual('Inner Cache Boundary', clidr.get_field_name('ICB'))
+
+    def test_set_value_get_individual_field(self):
+        clidr = CLIDR_EL1()
+        self.assertEqual(0, clidr.get_field('Ctype1'))
+        self.assertEqual(0, clidr.get_field('Ctype2'))
+        self.assertEqual(0, clidr.get_field('Ctype3'))
+        self.assertEqual(0, clidr.get_field('Ctype4'))
+        self.assertEqual(0, clidr.get_field('Ctype5'))
+        self.assertEqual(0, clidr.get_field('Ctype6'))
+        self.assertEqual(0, clidr.get_field('Ctype7'))
+        self.assertEqual(0, clidr.get_field('LoUIS'))
+        self.assertEqual(0, clidr.get_field('LoC'))
+        self.assertEqual(0, clidr.get_field('LoUU'))
+        self.assertEqual(0, clidr.get_field('ICB'))
+
+        clidr.set_value(0x49249249)
+        self.assertEqual(1, clidr.get_field('Ctype1'))
+        self.assertEqual(1, clidr.get_field('Ctype2'))
+        self.assertEqual(1, clidr.get_field('Ctype3'))
+        self.assertEqual(1, clidr.get_field('Ctype4'))
+        self.assertEqual(1, clidr.get_field('Ctype5'))
+        self.assertEqual(1, clidr.get_field('Ctype6'))
+        self.assertEqual(1, clidr.get_field('Ctype7'))
+        self.assertEqual(1, clidr.get_field('LoUIS'))
+        self.assertEqual(1, clidr.get_field('LoC'))
+        self.assertEqual(1, clidr.get_field('LoUU'))
+        self.assertEqual(1, clidr.get_field('ICB'))
+
+        clidr.set_value(0x0a200023)
+        self.assertEqual(3, clidr.get_field('Ctype1'))
+        self.assertEqual(4, clidr.get_field('Ctype2'))
+        self.assertEqual(0, clidr.get_field('Ctype3'))
+        self.assertEqual(0, clidr.get_field('Ctype4'))
+        self.assertEqual(0, clidr.get_field('Ctype5'))
+        self.assertEqual(0, clidr.get_field('Ctype6'))
+        self.assertEqual(0, clidr.get_field('Ctype7'))
+        self.assertEqual(1, clidr.get_field('LoUIS'))
+        self.assertEqual(2, clidr.get_field('LoC'))
+        self.assertEqual(1, clidr.get_field('LoUU'))
+        self.assertEqual(0, clidr.get_field('ICB'))
+
+        self.assertEqual('Separate instruction and data caches', clidr.get_field_value_name('Ctype1'))
+        self.assertEqual('Unified cache', clidr.get_field_value_name('Ctype2'))
+        self.assertEqual('No cache', clidr.get_field_value_name('Ctype3'))
+        self.assertEqual('No cache', clidr.get_field_value_name('Ctype4'))
+        self.assertEqual('No cache', clidr.get_field_value_name('Ctype5'))
+        self.assertEqual('No cache', clidr.get_field_value_name('Ctype6'))
+        self.assertEqual('No cache', clidr.get_field_value_name('Ctype7'))
+        self.assertEqual(False, clidr.get_field_value_name('LoUIS'))
+        self.assertEqual(False, clidr.get_field_value_name('LoC'))
+        self.assertEqual(False, clidr.get_field_value_name('LoUU'))
+        self.assertEqual('Not disclosed by this mechanism', clidr.get_field_value_name('ICB'))
+
 
 class OutputTestCase(unittest.TestCase):
     #FIXME: Move to common unittest infrastructure module
@@ -363,10 +480,20 @@ class ARMInstructionTest(ARMTestUtil):
         cache_line_size = qemu_stderr[0:2]
         number_of_sets = qemu_stderr[2:4]
         number_of_ways = qemu_stderr[4:6]
+        number_of_caches_temp = qemu_stderr[6:14]
+        print('number_of_caches_temp = ', number_of_caches_temp)
+        print('size of bit is ', hex(int(qemu_stderr[6:14], 16)))
+        packed = struct.pack('>I', int(qemu_stderr[6:14], 16))
+        print('packed = ', packed)
+        swapped = struct.unpack('>i', struct.pack('<i', int(qemu_stderr[6:14], 16)))
+        print('swapped = ', '{:#010x}'.format(swapped[0]), type(swapped[0]))
+        # print('dumdum is ', struct.unpack('>c', list(completed_process.stderr[6:14])))
+        # number_of_caches = int.from_bytes(qemu_stderr[6:14], byteorder='big')
         # number_of_caches =
         print(cache_line_size)
         print(number_of_sets)
         print(number_of_ways)
+        print(number_of_caches_temp)
         #6 means cache line size of 64 bytes
         #0x7f means 128 sets
         #3 means 4 ways
@@ -378,6 +505,7 @@ class ARMInstructionTest(ARMTestUtil):
         Verify that a critical section mutex can be achieved using
         load and store exclusives.
         """
+
         completed_process = subprocess.run([self.as_path, '-mcpu=cortex-a53', '-g', self.asm_source_file, '-o', self.obj_output_file]);
         completed_process = subprocess.run([self.ld_path, '-M', '-print-memory-usage', '-T', self.linker_source_file, self.obj_output_file, '-o', self.elf_output_file]);
         completed_process = subprocess.run([self.objdump_path, '-t', '-d', self.elf_output_file])
