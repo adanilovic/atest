@@ -7,6 +7,15 @@ _Reset:
 vector_table_el3:
     curr_el_sp0_sync:
 
+Reset_Handler:
+    bl register_init
+    bl disable_caches
+
+    mov x0, #0      //init level 1 cache
+    bl cache_init
+
+    b cpu_boot      //doesn't return
+
 register_init:
     mov x0,  xzr
     mov x1,  xzr
@@ -51,26 +60,51 @@ write_byte_to_stderr:
     hlt #0xf000
     ret
 
-cache_init:
+write_dword_to_stderr:
+    /*
+    Write 4 bytes to stderr using the Angel semi-hosting
+    interface
+
+    Args:
+        x1 - Address to write to stderr
+    */
+    mov w0, #0x03
+    hlt #0xf000
+    add x1, x1, #1
+    mov w0, #0x03
+    hlt #0xf000
+    add x1, x1, #1
+    mov w0, #0x03
+    hlt #0xf000
+    add x1, x1, #1
+    mov w0, #0x03
+    hlt #0xf000
+    ret
+
+disable_caches:
     mrs x0, SCTLR_EL3
     bic x0, x0, #(0x1 << 2)
     msr SCTLR_EL3, x0
+    ret
 
-    mov x0, #0x0
+cache_init:
+    /*
+    Initialize the given level of cache
+
+    Args:
+        x0 - Contains the level of cache that will be initialized
+    */
     msr CSSELR_EL1, x0
     
     mrs x4, CCSIDR_EL1
     and x1, x4, #0x7
-    add x1, x1, #0x4
-
-    adr x7, ccsidr
-    str x4, [x7]
+    add x1, x1, #0x4            //cache line size
 
     ldr x3, =0x7FFF
-    and x2, x3, x4, LSR #13
+    and x2, x3, x4, LSR #13     //num sets - 1
 
     ldr x3, =0x3FF
-    and x3, x3, x4, lsr #3
+    and x3, x3, x4, lsr #3      //num ways - 1
 
     clz w4, w3
 
@@ -92,13 +126,25 @@ cache_init:
 
     ret
 
-Reset_Handler:
-    bl register_init
-    bl cache_init
+tlb_init:
+    ldr x1, =0x3520
+    msr TCR_EL3, x1
+
+    ldr x1, =0xff440400
+    msr MAIR_EL3, x1
+
+    adr x0, ttbr0_el3_base
+    msr TTBR0_EL3, x0
+
+    ret
+
+cpu_boot:
     mrs x0, MPIDR_EL1
     and x0, x0, #0xFFFF
-    cbz x0, cpu0_boot
+    cmp x0, #0x00
+    beq cpu0_boot
     cmp x0, #0x01
+    beq cpu1_boot
     cmp x0, #0x02
     beq cpu2_boot
     cmp x0, #0x03
@@ -129,27 +175,38 @@ cpu3_boot:
     b .
 
 boot:
+    mov x0, #2      //init level 2 cache
+    bl cache_init
 
-    adr x1, ccsidr
-    bl write_byte_to_stderr
-    add x1, x1, #1
-    bl write_byte_to_stderr
-    add x1, x1, #1
-    bl write_byte_to_stderr
-    add x1, x1, #1
-    bl write_byte_to_stderr
+    b .
+
+    mov x0, #0
+    msr CSSELR_EL1, x0
+
+    mrs x8, CCSIDR_EL1
+    adr x1, output
+    str x8, [x1]
+    bl write_dword_to_stderr
+
+    mov x0, #1
+    msr CSSELR_EL1, x0
+
+    mrs x8, CCSIDR_EL1
+    adr x1, output
+    str x8, [x1]
+    bl write_dword_to_stderr
 
     mrs x8, CLIDR_EL1
-    adr x1, number_of_caches
+    adr x1, output
     str x8, [x1]
-    bl write_byte_to_stderr
-    add x1, x1, #1
-    bl write_byte_to_stderr
-    add x1, x1, #1
-    bl write_byte_to_stderr
-    add x1, x1, #1
-    bl write_byte_to_stderr
+    bl write_dword_to_stderr
 
+    mrs x8, ID_AA64MMFR0_EL1
+    adr x1, output
+    str x8, [x1]
+    bl write_dword_to_stderr
+
+    bl tlb_init 
     /*MMU Registers
 
     TLB Registers
@@ -170,6 +227,37 @@ boot:
 .balign 8
 code:                       .dword 0x00020026
 status:                     .dword 0x77777777
-number_of_caches:           .dword 0xffffffff
-ccsidr:                     .dword 0xffffffff
+output:                     .dword 0xffffffff
+
+.macro PUT_64B high, low
+.word \low
+.word \high
+.endm
+
+.macro TABLE_ENTRY PA, ATTR
+PUT_64B \ATTR, (\PA) + 0x3
+.endm
+
+.macro BLOCK_1GB PA, ATTR_HI, ATTR_LO
+PUT_64B \ATTR_HI, ((\PA) & 0xC0000000) | \ATTR_LO | 0x1
+.endm
+
+.macro BLOCK_2MB PA, ATTR_HI, ATTR_LO
+PUT_64B \ATTR_HI, ((\PA) & 0xFFE00000) | \ATTR_LO | 0x1
+.endm
+
+.align 12
+ttbr0_el3_base:
+TABLE_ENTRY level2_pagetable, 0
+BLOCK_1GB 0x40000000, 0, 0x740
+BLOCK_1GB 0x80000000, 0, 0x740
+BLOCK_1GB 0xC0000000, 0, 0x740
+
+.align 12
+level2_pagetable:
+.set ADDR, 0x000
+.rept 0x200
+BLOCK_2MB (ADDR << 20), 0, 0x74C
+.set ADDR, ADDR+2
+.endr
 .end
